@@ -1,0 +1,432 @@
+# ESPHome config for a modified GeekMagic RetroClock 
+#   (PCB V1.4-20260823)
+#   ESP12 module
+#   LCD N279-1442KIWIG01-C10
+#   Epson R8025 Real Time Clock
+#     CR1220 lithium backup cell
+#   Button switch
+#
+# The modification replaces the ESP12H (ESP8285MOD) with
+# a more powerful ESP32-C3F module. 
+# This allows the use of ESPHome with LVGL
+#
+
+esphome:
+  name: retroclock
+  friendly_name: RetroClock
+  on_boot:
+    then:
+      # read the RTC time once when the system boots
+      rx8025t.read_time:
+
+esp32:
+  variant: esp32c3
+  framework:
+    advanced:
+      flash_chip: generic
+
+# Enable logging
+logger:
+  level: VERBOSE
+  initial_level: DEBUG
+  logs:
+    homeassistant.sensor: VERBOSE
+    
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_key_retroclock
+ota:
+  - platform: esphome
+    encryption:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: RetroClock Fallback Hotspot
+    password: !secret ap_fallback_password
+  on_connect:
+    then:
+      - output.turn_on: buzzer
+      - output.ledc.set_frequency:
+          id: buzzer
+          frequency: "1kHz"
+      - output.set_level:
+         id: buzzer
+         level: "10%"
+      - delay: 50ms
+      - output.turn_off: buzzer
+        
+captive_portal:
+  
+i2c:
+  - id: i2c_1
+    scl: 18
+    sda: 4
+
+external_components:
+  - source: 
+      type: git
+      url: https://github.com/tuct/esphome-lvgl-clock
+    refresh: 0s
+    components: [lvgl_clock]
+    
+time:
+  # Internet based NTP
+  - platform: sntp
+    id: clock_time
+    timezone: "GMT0BST,M3.5.0/1,M10.5.0"
+    update_interval: 15min
+  # onboard battery backed RTC
+  - platform: rx8025t
+    # repeated synchronization is not necessary unless the external RTC
+    # is much more accurate than the internal clock
+    update_interval: never
+
+interval:
+  - interval: 60min
+    startup_delay: 1min
+    then:
+      - rx8025t.write_time
+      - logger.log: "Update RTC"
+
+# Output & Light defined for the backlight
+output:
+  # output pin for LCD backlight
+
+  - platform: ledc
+    id: backlight_pwm
+    pin:
+      number: GPIO19
+    inverted: true
+
+  # output pin for buzzer
+  - platform: ledc
+    pin: GPIO10
+    id: buzzer
+
+light:
+  - platform: monochromatic
+    id: backlight
+    name: Backlight
+    output: backlight_pwm
+    restore_mode: RESTORE_DEFAULT_ON
+    internal: False
+    default_transition_length: 500ms
+  
+spi:
+  clk_pin: GPIO3
+  mosi_pin: GPIO5
+  type: single
+
+# Use a CUSTOM MIPI_SPI display driver
+# Does not use CS therefore use SPI Mode 0
+
+display:
+  - platform: mipi_spi
+    model: custom
+    spi_mode: MODE0
+    dc_pin: GPIO9
+    reset_pin: GPIO8
+    dimensions:
+      height: 428
+      width: 142
+      offset_width: 12  # Vendor window starts from X=12, must keep
+    rotation: 0
+    invert_colors: true # needed for this display/driver
+    color_order: BGR
+    color_depth: 16bit
+    data_rate: 20MHz
+    auto_clear_enabled: false
+    update_interval: never # LVGL handles updates
+    init_sequence:
+      # ------------------------------------------------------------------
+      # 0xFF = PAGE SELECT.
+      # 0xA5 -> extended (vendor) register page: power, gamma, gate, clocks
+      # 0x00 -> standard MIPI DCS page: sleep, pixel format, display on...
+      # Everything between the two 0xFF lines is vendor configuration.
+      # Without the unlock, writes land wrongly and the picture wraps/garbles.
+      # ------------------------------------------------------------------
+
+      - [0xFF, 0xA5]
+
+      # ---- POWER: charge pumps / supply voltages (PWRCTRL12-16, PWRCTRL1) ----
+      # These set the internal voltage rails that drive the liquid crystal.
+      # Wrong values -> dim picture, low contrast, or flicker.
+      
+      - [0x9A, 0x08] # PWRCTRL12
+      - [0x9B, 0x08] # PWRCTRL13
+      - [0x9C, 0xB0] # PWRCTRL14
+      - [0x9D, 0x16] # PWRCTRL15
+      - [0x9E, 0xC4] # PWRCTRL16
+      - [0x8F, 0x55, 0x04] # PWRCTRL1 (2 params) 
+
+      # ---- GATE LDO / regulator (GLDOCTRL1-3) ----
+      # Regulator for the gate-driver supply. (Note the vendor order: 0x84, 0x83, 0x85.)
+
+      - [0x84, 0x90] # GLDOCTRL2
+      - [0x83, 0x7B] # GLDOCTRL1
+      - [0x85, 0x33] # GLDOCTRL3
+        
+      # ---- GAMMA: brightness-to-voltage curve ----
+      # 16 control points for positive polarity (0x60-0x6F = GAMCTRL1-16)
+      # and 16 for negative polarity (0x70-0x7F = GAMCTRL17-32). LCDs are
+      # driven with alternating polarity, so each pair gets the same value
+      # here (symmetric curve). Order below is the vendor's, not numeric.
+      # Changing these alters contrast, tonal response and colour tint.
+      
+      - [0x60, 0x00] # GAMCTRL1 (+)
+      - [0x70, 0x00] # GAMCTRL17 (-)
+      - [0x61, 0x02] # GAMCTRL2
+      - [0x71, 0x02] # GAMCTRL18
+      - [0x62, 0x04] # GAMCTRL3
+      - [0x72, 0x04] # GAMCTRL19
+      - [0x6C, 0x29] # GAMCTRL13
+      - [0x7C, 0x29] # GAMCTRL29
+      - [0x6D, 0x31] # GAMCTRL14
+      - [0x7D, 0x31] # GAMCTRL30
+      - [0x6E, 0x0F] # GAMCTRL15
+      - [0x7E, 0x0F] # GAMCTRL31
+      - [0x66, 0x21] # GAMCTRL7
+      - [0x76, 0x21] # GAMCTRL23
+      - [0x68, 0x3A] # GAMCTRL9
+      - [0x78, 0x3A] # GAMCTRL25
+      - [0x63, 0x07] # GAMCTRL4
+      - [0x73, 0x07] # GAMCTRL20
+      - [0x64, 0x05] # GAMCTRL5
+      - [0x74, 0x05] # GAMCTRL21
+      - [0x65, 0x02] # GAMCTRL6
+      - [0x75, 0x02] # GAMCTRL22
+      - [0x67, 0x23] # GAMCTRL8
+      - [0x77, 0x23] # GAMCTRL24
+      - [0x69, 0x08] # GAMCTRL10
+      - [0x79, 0x08] # GAMCTRL26
+      - [0x6A, 0x13] # GAMCTRL11
+      - [0x7A, 0x13] # GAMCTRL27
+      - [0x6B, 0x13] # GAMCTRL12
+      - [0x7B, 0x13] # GAMCTRL28
+      - [0x6F, 0x00] # GAMCTRL16
+      - [0x7F, 0x00] # GAMCTRL32
+
+      # ---- INTERNAL TIMING (0x50, 0x52 unnamed; 0x53-0x56 = ITCTRL1-4) ----
+      # Low-level timing/driving setup. Purpose of individual values isn't
+      # publicly documented (inferred: scan/charge timing). Leave as-is.
+
+      - [0x50, 0x00]
+      - [0x52, 0xD6]
+      - [0x53, 0x08] # ITCTRL1
+      - [0x54, 0x08] # ITCTRL2   
+      - [0x55, 0x1E] # ITCTRL3
+      - [0x56, 0x1C] # ITCTRL4
+        
+      # ---- GATE DRIVER (GOA = gate-on-array; datasheet: 24-channel GIP, dual-gate) ----
+      # The row-select circuitry is built into the glass. These registers shape
+      # its start pulses (VSTCTRL = vertical start, inferred) and layout.
+      
+      - [0xA0, 0x2B, 0x24, 0x00]  # GOACTRL (3 params)
+      - [0xA1, 0x87]       # VSTCTRL1
+      - [0xA2, 0x86]       # VSTCTRL2
+      - [0xA5, 0x00]       # VSTCTRL5
+      - [0xA6, 0x00]       # VSTCTRL6
+      - [0xA7, 0x00]       # VSTCTRL7
+      - [0xA8, 0x36]       # VSTCTRL8
+      - [0xA9, 0x7E]       # VSTCTRL9
+      - [0xAA, 0x7E]       # VSTCTRL10
+
+      # ---- GATE CLOCKS (CLKCTRL1-25) ----
+      # Clock waveforms for the glass-integrated gate driver. Note the pattern:
+      # 0x85..0x80 counting down, 0x68..0x6F counting up. This looks like
+      # assigning clock lines to output pins (inferred) - a hardware
+      # mapping for THIS panel, which is why it must match the glass exactly.
+      
+      - [0xB9, 0x85]       # CLKCTRL1
+      - [0xBA, 0x84]       # CLKCTRL2
+      - [0xBB, 0x83]       # CLKCTRL3
+      - [0xBC, 0x82]       # CLKCTRL4
+      - [0xBD, 0x81]       # CLKCTRL5
+      - [0xBE, 0x80]       # CLKCTRL6
+      - [0xBF, 0x01]       # CLKCTRL7
+      - [0xC0, 0x02]       # CLKCTRL8
+      - [0xC1, 0x00]       # CLKCTRL9
+      - [0xC2, 0x00]       # CLKCTRL10
+      - [0xC3, 0x00]       # CLKCTRL11
+      - [0xC4, 0x33]       # CLKCTRL12
+      - [0xC5, 0x7E]       # CLKCTRL13
+      - [0xC6, 0x7E]       # CLKCTRL14
+      - [0xC8, 0x33, 0x33] # CLKCTRL16 (2 params)
+      - [0xC9, 0x68]       # CLKCTRL17
+      - [0xCA, 0x69]       # CLKCTRL18
+      - [0xCB, 0x6A]       # CLKCTRL19
+      - [0xCC, 0x6B]       # CLKCTRL20
+      - [0xCD, 0x33, 0x33] # CLKCTRL21 (2 params)
+      - [0xCE, 0x6C]       # CLKCTRL22
+      - [0xCF, 0x6D]       # CLKCTRL23
+      - [0xD0, 0x6E]       # CLKCTRL24
+      - [0xD1, 0x6F]       # CLKCTRL25
+
+      # ---- VENDOR CONTROL (VENDCTRL1-4, 9-14) ----
+      # Vendor-specific panel tuning; no public per-bit description.
+      
+      - [0xAB, 0x03, 0x67] # VENDCTRL1
+      - [0xAC, 0x03, 0x6B] # VENDCTRL2
+      - [0xAD, 0x03, 0x68] # VENDCTRL3
+      - [0xAE, 0x03, 0x6C] # VENDCTRL4
+      - [0xB3, 0x00]       # VENDCTRL9
+      - [0xB4, 0x00]       # VENDCTRL10
+      - [0xB5, 0x00]       # VENDCTRL11
+      - [0xB6, 0x32]       # VENDCTRL12
+      - [0xB7, 0x7E]       # VENDCTRL13
+      - [0xB8, 0x7E]       # VENDCTRL14
+
+      # ---- SOURCE DRIVER (SOUCTRL1-19, FSMCTRL) ----
+      # Column driver: the datasheet lists a 252-channel source driver.
+      # These set its output timing/drive. FSMCTRL (0xF9) is a state-machine
+      # control (name only; behaviour not documented publicly).
+      
+      - [0xE0, 0x00]       # SOUCTRL1
+      - [0xE1, 0x03, 0x0F] # SOUCTRL2 (2 params)
+      - [0xE2, 0x04]       # SOUCTRL3
+      - [0xE3, 0x01]       # SOUCTRL4
+      - [0xE4, 0x0E]       # SOUCTRL5
+      - [0xE5, 0x01]       # SOUCTRL6
+      - [0xE6, 0x19]       # SOUCTRL7
+      - [0xE7, 0x10]       # SOUCTRL8
+      - [0xE8, 0x10]       # SOUCTRL9
+      - [0xEA, 0x12]       # SOUCTRL11
+      - [0xEB, 0xD0]       # SOUCTRL12
+      - [0xEC, 0x04]       # SOUCTRL13
+      - [0xED, 0x07]       # SOUCTRL14
+      - [0xEE, 0x07]       # SOUCTRL15
+      - [0xEF, 0x09]       # SOUCTRL16
+      - [0xF0, 0xD0]       # SOUCTRL17
+      - [0xF1, 0x0E]       # SOUCTRL18
+      - [0xF9, 0x17]       # FSMCTRL
+      #- [0xF2, 0x2C, 0x1B, 0x0B, 0x20]  # SOUCTRL19 (4 params)
+      #- [0xE9, 0x29]       # SOUCTRL10 (written after the others, as in the vendor file)
+      - [0xE9, 0x29]
+      - [0xEC, 0x04]       # SOUCTRL13 again (vendor file repeats it; harmless)
+
+      # ---- TEARING EFFECT (TE) ----
+      # TE is a sync pin the controller can pulse each frame so your MCU can
+      # time updates and avoid tearing. ESPHome doesn't use it by default,
+      # so this block is optional unless you wire the TE pin.
+      
+      - [0x35]             # TEON: enable TE output (sent without a parameter, as in the source)
+      - [0x44, 0x00, 0x10] # TECTRL1: TE line position (2 params)
+      - [0x46, 0x10]       # TECTRL3
+        
+      # ------------------------------------------------------------------
+      # Back to the standard DCS page for normal MIPI commands.
+      # ------------------------------------------------------------------
+      
+      - [0xFF, 0x00]
+      - [0x3A, 0x06]       # COLMOD: pixel format. 16-bit (RGB565), matches color_depth: 16
+      - [0x11]             # SLPOUT: wake from sleep (boot state is sleep)
+      - delay 200ms        # let the DC-DC converters start before the next command
+      #- [0x13]             # NORON: normal display mode (not partial)
+      - [0x29]             # DISPON: start showing GRAM contents
+      - delay 50ms
+
+# Digit font: any ESPHome font: (a TTF at any size) or a built-in LVGL
+# montserrat_*. Give an ESPHome font an id that is NOT a built-in font name.
+font:
+  - file: "gfonts://Archivo+Narrow"
+    id: flip_font
+    size: 120                          # digit height in px
+    glyphs: "0123456789"               # digits only; AM/PM uses am_pm_font
+
+color:
+  - id: cc_page
+    red: 0%
+    green: 0%
+    blue: 0%
+
+  - id: cc_card
+    red: 20%
+    green: 20%
+    blue: 20%
+    
+  - id: cc_hands
+    red: 100%
+    green: 100%
+    blue: 100%
+
+  - id: cc_bg
+    red: 0%
+    green: 0%
+    blue: 0%
+
+  - id: cc_blue
+    red: 0%
+    green: 0%
+    blue: 100%
+
+  - id: cc_green
+    red: 0%
+    green: 100%
+    blue: 0%
+
+  - id: cc_red
+    red: 100%
+    green: 0%
+    blue: 0%
+
+# Custom widget for flip clock        
+
+lvgl_clock:
+
+lvgl:
+  rotation: 270
+  bg_color: cc_bg
+  widgets:
+    - lvgl_clock:
+        id: dc
+        time_id: clock_time
+        width: 424
+        height: 140
+        align: CENTER
+        style: flipclock
+        foreground: cc_hands          # digit colour
+        background: cc_bg             # behind the cards + the seam line
+        show_seconds: false           # HH:MM only
+        twenty_four_hour: true        # 1-12 + a dedicated AM/PM card up front
+        flipclock:
+          font: flip_font
+          card_color: cc_card         # card fill (defaults to a dark grey)
+          flip_duration: 200ms        # one digit flip; 0 = no animation
+          blank_leading_zero: true
+          show_dots: true
+          am_pm_font: montserrat_24   # AM/PM card text (built-in or a font: id)
+
+binary_sensor:
+
+ # Sensor for button
+ - platform: gpio
+   pin:
+     number: GPIO1
+     mode:
+       input: true
+       pullup: true
+     inverted: true
+   name: button
+   filters:
+     - delayed_on: 10ms
+     - delayed_off: 10ms
+   on_press:
+     - then:
+       - logger.log: "Button press"
+       - output.turn_on: buzzer
+       - output.ledc.set_frequency:
+           id: buzzer
+           frequency: "1kHz"
+       - output.set_level:
+           id: buzzer
+           level: "50%"
+   on_release:
+     - then:
+       - logger.log: "Button release"
+       - output.turn_off: buzzer
+
+web_server:
+
