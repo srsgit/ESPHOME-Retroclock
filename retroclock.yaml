@@ -68,7 +68,8 @@ i2c:
 external_components:
   - source: 
       type: git
-      url: https://github.com/tuct/esphome-lvgl-clock
+      url: https://github.com/srsgit/esphome-lvgl-clock
+      # url: https://github.com/tuct/esphome-lvgl-clock
     refresh: 0s
     components: [lvgl_clock]
     
@@ -131,13 +132,13 @@ display:
     reset_pin: GPIO8
     dimensions:
       height: 428
-      width: 142
+      width: 144
       offset_width: 12  # Vendor window starts from X=12, must keep
     rotation: 0
     invert_colors: true # needed for this display/driver
     color_order: BGR
     color_depth: 16bit
-    data_rate: 20MHz
+    data_rate: 80MHz
     auto_clear_enabled: false
     update_interval: never # LVGL handles updates
     init_sequence:
@@ -321,7 +322,7 @@ display:
       # ------------------------------------------------------------------
       
       - [0xFF, 0x00]
-      - [0x3A, 0x06]       # COLMOD: pixel format. 16-bit (RGB565), matches color_depth: 16
+      - [0x3A, 0x05]       # COLMOD: pixel format. 16-bit (RGB565), matches color_depth: 16
       - [0x11]             # SLPOUT: wake from sleep (boot state is sleep)
       - delay 200ms        # let the DC-DC converters start before the next command
       #- [0x13]             # NORON: normal display mode (not partial)
@@ -333,7 +334,7 @@ display:
 font:
   - file: "gfonts://Archivo+Narrow"
     id: flip_font
-    size: 120                          # digit height in px
+    size: 140                          # digit height in px
     glyphs: "0123456789"               # digits only; AM/PM uses am_pm_font
 
 color:
@@ -343,9 +344,9 @@ color:
     blue: 0%
 
   - id: cc_card
-    red: 20%
-    green: 20%
-    blue: 20%
+    red: 30%
+    green: 30%
+    blue: 40%
     
   - id: cc_hands
     red: 100%
@@ -384,7 +385,7 @@ lvgl:
         id: dc
         time_id: clock_time
         width: 424
-        height: 140
+        height: 144
         align: CENTER
         style: flipclock
         foreground: cc_hands          # digit colour
@@ -429,4 +430,3 @@ binary_sensor:
        - output.turn_off: buzzer
 
 web_server:
-
