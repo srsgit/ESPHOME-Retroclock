@@ -79,6 +79,14 @@ time:
     id: clock_time
     timezone: "GMT0BST,M3.5.0/1,M10.5.0"
     update_interval: 15min
+    on_time:
+      # Every minute
+      - seconds: 0
+        then:
+        - lvgl.label.update:
+            id: date_label
+            text: !lambda 'return id(clock_time).now().strftime("%A   %d %b %Y");'
+          
   # onboard battery backed RTC
   - platform: rx8025t
     # repeated synchronization is not necessary unless the external RTC
@@ -94,8 +102,8 @@ interval:
 
 # Output & Light defined for the backlight
 output:
+  
   # output pin for LCD backlight
-
   - platform: ledc
     id: backlight_pwm
     pin:
@@ -332,10 +340,13 @@ display:
 # Digit font: any ESPHome font: (a TTF at any size) or a built-in LVGL
 # montserrat_*. Give an ESPHome font an id that is NOT a built-in font name.
 font:
-  - file: "gfonts://Archivo+Narrow"
+  - file: "gfonts://Archivo"
     id: flip_font
-    size: 140                          # digit height in px
+    size: 104                          # digit height in px
     glyphs: "0123456789"               # digits only; AM/PM uses am_pm_font
+  - file: "gfonts://Archivo"
+    id: dtg_font
+    size: 36                           # digit height in px
 
 color:
   - id: cc_page
@@ -344,9 +355,9 @@ color:
     blue: 0%
 
   - id: cc_card
-    red: 10%
-    green: 10%
-    blue: 10%
+    red: 25%
+    green: 25%
+    blue: 25%
     
   - id: cc_hands
     red: 100%
@@ -382,23 +393,33 @@ lvgl:
   bg_color: cc_bg
   widgets:
     - lvgl_clock:
-        id: dc
-        time_id: clock_time
+        id: flipclock
         width: 424
-        height: 142
-        align: CENTER
-        style: flipclock
+        height: 110
+        align: TOP_MID
+        grayscale: true
+        time_id: clock_time
         foreground: cc_hands          # digit colour
         background: cc_bg             # behind the cards + the seam line
+        style: flipclock
         show_seconds: false           # HH:MM only
         twenty_four_hour: true        # 1-12 + a dedicated AM/PM card up front
         flipclock:
           font: flip_font
           card_color: cc_card         # card fill (defaults to a dark grey)
-          flip_duration: 200ms        # one digit flip; 0 = no animation
+          flip_duration: 700ms        # one digit flip; 0 = no animation
           blank_leading_zero: true
           show_dots: true
+          blink: true
           am_pm_font: montserrat_24   # AM/PM card text (built-in or a font: id)
+    - label:
+        id: date_label
+        align: BOTTOM_MID
+        bg_color: cc_bg
+        text_color: cc_hands
+        text: "-----------------------"
+        text_align: CENTER
+        text_font: dtg_font
 
 binary_sensor:
 
@@ -417,16 +438,16 @@ binary_sensor:
    on_press:
      - then:
        - logger.log: "Button press"
-       - output.turn_on: buzzer
-       - output.ledc.set_frequency:
-           id: buzzer
-           frequency: "1kHz"
-       - output.set_level:
-           id: buzzer
-           level: "50%"
+       #- output.turn_on: buzzer
+       #- output.ledc.set_frequency:
+       #    id: buzzer
+       #    frequency: "1kHz"
+       #- output.set_level:
+       #    id: buzzer
+       #    level: "50%"
+         
    on_release:
      - then:
        - logger.log: "Button release"
-       - output.turn_off: buzzer
 
 web_server:
