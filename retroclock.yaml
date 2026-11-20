@@ -132,7 +132,7 @@ display:
     reset_pin: GPIO8
     dimensions:
       height: 428
-      width: 144
+      width: 142
       offset_width: 12  # Vendor window starts from X=12, must keep
     rotation: 0
     invert_colors: true # needed for this display/driver
@@ -344,9 +344,9 @@ color:
     blue: 0%
 
   - id: cc_card
-    red: 30%
-    green: 30%
-    blue: 40%
+    red: 10%
+    green: 10%
+    blue: 10%
     
   - id: cc_hands
     red: 100%
@@ -385,7 +385,7 @@ lvgl:
         id: dc
         time_id: clock_time
         width: 424
-        height: 144
+        height: 142
         align: CENTER
         style: flipclock
         foreground: cc_hands          # digit colour
